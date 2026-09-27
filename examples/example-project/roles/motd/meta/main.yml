@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: motd
+  namespace: example
+  author: ops
+  description: Manage /etc/motd
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+    - name: Debian
+      versions: [bookworm]
+    - name: EL
+      versions: ["9"]
+dependencies: []

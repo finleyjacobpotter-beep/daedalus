@@ -1,0 +1,31 @@
+[project]
+name = "hostreport"
+version = "0.1.0"
+description = "Example ops script: report OS facts as JSON"
+# 3.9 = oldest python3 on the target boxes (Rocky 9), tested via `make vm-test`
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+hostreport = "hostreport.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hostreport"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = ["S101"]  # asserts are fine in tests
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

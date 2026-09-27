@@ -1,0 +1,4 @@
+---
+# Encrypt before committing real values:
+#   make vault-edit    (or: ansible-vault encrypt --vault-id dev@/usr/local/bin/gpg-vault-client group_vars/all/vault.yml)
+vault_motd_owner: ops@example.com

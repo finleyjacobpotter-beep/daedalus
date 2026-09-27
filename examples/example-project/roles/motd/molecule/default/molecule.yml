@@ -1,0 +1,27 @@
+---
+# Runs inside the daedalus: molecule -> vagrant -> vagrant-libvirt -> host
+# libvirtd (via the forwarded socket) -> bento boxes.
+driver:
+  name: vagrant
+  provider:
+    name: libvirt
+platforms:
+  - name: motd-ubuntu
+    box: bento/ubuntu-24.04
+    memory: 1024
+    cpus: 1
+  - name: motd-debian
+    box: bento/debian-12
+    memory: 1024
+    cpus: 1
+  - name: motd-rocky
+    box: bento/rockylinux-9
+    memory: 1024
+    cpus: 1
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+verifier:
+  name: ansible

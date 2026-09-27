@@ -1,0 +1,11 @@
+# PLACEHOLDER - not yet locked. Run `make lock` to replace this file with a
+# fully pinned, hashed lock generated from requirements-tools.in.
+ansible-core>=2.18
+ansible-lint
+molecule
+molecule-plugins[vagrant]
+yamllint
+hvac
+jmespath
+netaddr
+passlib

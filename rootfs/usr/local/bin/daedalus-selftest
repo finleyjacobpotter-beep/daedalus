@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Smoke test run by `make test` in the daedalus repo and in CI.
+set -uo pipefail
+fail=0
+check() { if "$@" >/dev/null 2>&1; then printf 'ok    %s\n' "$*"; else printf 'FAIL  %s\n' "$*"; fail=1; fi; }
+
+for bin in vi vim nvim ssh ssh-agent ssh-add gpg bao fj buildah podman skopeo \
+           vagrant virsh ansible ansible-playbook ansible-vault ansible-galaxy \
+           ansible-lint molecule yamllint python3 uv git rsync jq make; do
+  check command -v "$bin"
+done
+check vagrant plugin list
+check bash -c 'vagrant plugin list | grep -q vagrant-libvirt'
+check bao version
+check fj --version
+check buildah info
+check ansible-vault --help
+check bash -c 'echo test | gpg --batch --symmetric --passphrase x --pinentry-mode loopback -o /tmp/t.gpg && gpg --batch --passphrase x --pinentry-mode loopback -d /tmp/t.gpg'
+
+if [[ "${DAEDALUS_SELFTEST_BUILD:-0}" == 1 ]]; then
+  check bash -c 'printf "FROM scratch\nCOPY x /x\n" > /tmp/Cf && touch /tmp/x && buildah bud -f /tmp/Cf -t selftest /tmp'
+fi
+exit $fail

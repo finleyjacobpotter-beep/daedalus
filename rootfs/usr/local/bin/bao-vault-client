@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Ansible vault-id client script backed by OpenBao KV.
+# Ansible calls it as: bao-vault-client --vault-id <id>
+# and reads the vault password from stdout.
+#
+#   ansible.cfg:  vault_identity_list = prod@/usr/local/bin/bao-vault-client
+#
+# The password is read from: <mount>/<path>/<vault-id>, field <field>
+#   ANSIBLE_VAULT_BAO_MOUNT (default: secret)
+#   ANSIBLE_VAULT_BAO_PATH  (default: ansible/vault)
+#   ANSIBLE_VAULT_BAO_FIELD (default: password)
+# Requires BAO_ADDR and a token (bao login, BAO_TOKEN, or ~/.vault-token).
+set -euo pipefail
+
+id="default"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --vault-id) id="$2"; shift 2 ;;
+    --vault-id=*) id="${1#*=}"; shift ;;
+    *) shift ;;
+  esac
+done
+
+mount="${ANSIBLE_VAULT_BAO_MOUNT:-secret}"
+path="${ANSIBLE_VAULT_BAO_PATH:-ansible/vault}"
+field="${ANSIBLE_VAULT_BAO_FIELD:-password}"
+
+exec bao kv get -mount="$mount" -field="$field" "${path}/${id}"
