@@ -1,4 +1,4 @@
-# Allowlisting HTTP(S) egress proxy for `make agent` sessions.
+# Allowlisting HTTP(S) egress proxy for `daedalus agent` sessions.
 # The agent container sits on an --internal podman network with no route out;
 # this proxy is the only thing attached to both that network and one with
 # internet access, and it only forwards to domains in allowlist.txt.

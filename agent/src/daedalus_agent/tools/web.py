@@ -1,6 +1,6 @@
 """web_fetch: HTTP(S) GET through whatever proxy the environment sets.
 
-In `make agent` that proxy is ariadne, so only allowlisted domains resolve.
+In `daedalus agent` that proxy is ariadne, so only allowlisted domains resolve.
 """
 
 from __future__ import annotations

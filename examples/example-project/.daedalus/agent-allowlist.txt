@@ -1,4 +1,4 @@
-# Domains an AI agent session (make agent) may reach over HTTP(S).
+# Domains an AI agent session (daedalus agent) may reach over HTTP(S).
 # Squid dstdomain syntax: ".example.com" = domain + all subdomains.
 # Everything else, SSH, raw IPs and DNS are blocked.
 

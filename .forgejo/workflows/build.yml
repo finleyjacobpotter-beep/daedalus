@@ -1,6 +1,6 @@
 # Builds, smoke-tests and pushes both images.
 # Assumes a Forgejo runner registered with a `podman-host` label using the
-# host executor (podman installed on the runner). Building images inside a
+# host executor (podman and python3 >= 3.11 on the runner). Building images inside a
 # docker-executor job container needs a privileged runner instead.
 name: build-daedalus
 
@@ -23,10 +23,10 @@ jobs:
           echo "TAG=$t" >> "$GITHUB_ENV"
 
       - name: Build
-        run: make build TAG="$TAG" REGISTRY="${{ vars.REGISTRY }}"
+        run: python3 -m daedalus --registry "${{ vars.REGISTRY }}" --tag "$TAG" build
 
       - name: Smoke test
-        run: make test TAG="$TAG" REGISTRY="${{ vars.REGISTRY }}"
+        run: python3 -m daedalus --registry "${{ vars.REGISTRY }}" --tag "$TAG" test
 
       - name: Push
         env:
@@ -35,4 +35,4 @@ jobs:
         run: |
           reg="${{ vars.REGISTRY }}"
           echo "$REGISTRY_TOKEN" | podman login -u "$REGISTRY_USER" --password-stdin "${reg%%/*}"
-          make push TAG="$TAG" REGISTRY="${{ vars.REGISTRY }}"
+          python3 -m daedalus --registry "${{ vars.REGISTRY }}" --tag "$TAG" push

@@ -1,6 +1,6 @@
 """Code execution tools: run_bash and run_python.
 
-Both run in the workspace as the current user. Inside `make agent` that means
+Both run in the workspace as the current user. Inside `daedalus agent` that means
 the fenced labyrinth container; outside it, they are as powerful as your shell,
 which is why neither is ever enabled unless named explicitly.
 """

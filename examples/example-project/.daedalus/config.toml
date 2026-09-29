@@ -1,0 +1,12 @@
+# Settings for `daedalus` (python3 -m daedalus). `daedalus config` lists them all;
+# any of them can also come from DAEDALUS_<NAME> or `-o name=value`.
+
+# Pin the daedalus for this repo. Bump deliberately, like a lock file.
+image = "git.example.com/ops/daedalus"
+egress_image = "git.example.com/ops/ariadne"
+tag = "2026.09.1"
+# digest = "sha256:..."   # from `daedalus digest`; pins immutably
+
+# daedalus-agent: every tool is off unless listed here.
+# agent_tools = ["read_file", "list_dir", "glob", "grep", "edit_file", "write_file", "run_bash"]
+# agent_model = "anthropic:claude-opus-5-5"

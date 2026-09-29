@@ -26,7 +26,7 @@ There is no `all` shortcut. Unknown names are an error.
 | `list_dir` | read-only | list a directory |
 | `glob` | read-only | find files by pattern |
 | `grep` | read-only | regex search over file contents |
-| `web_fetch` | read-only | HTTP(S) GET; HTML is turned into text. Goes through `HTTPS_PROXY`, so in `make agent` only allowlisted domains work |
+| `web_fetch` | read-only | HTTP(S) GET; HTML is turned into text. Goes through `HTTPS_PROXY`, so in `daedalus agent` only allowlisted domains work |
 | `write_file` | files | create or overwrite a file |
 | `edit_file` | files | replace an exact snippet in a file |
 | `run_bash` | exec | `bash -c` in the workspace, with a timeout |
@@ -105,21 +105,22 @@ deadlock.
 | `anthropic` | `ANTHROPIC_API_KEY`; optional `ANTHROPIC_BASE_URL` |
 | `openai` | `OPENAI_API_KEY`; optional `OPENAI_BASE_URL` for any OpenAI-compatible server |
 
-In `make agent`, add the API host (e.g. `api.anthropic.com`) to
+In `daedalus agent`, add the API host (e.g. `api.anthropic.com`) to
 `.daedalus/agent-allowlist.txt`.
 
 ## In a project
 
-`daedalus.mk` wraps the three modes so they run inside the labyrinth fence:
+The `daedalus` command runs the three modes inside the labyrinth fence:
 
 ```sh
-make agent-ask       GOAL='why does molecule fail on rocky?' AGENT_TOOLS=read_file,grep
-make agent-hyperplan GOAL='split the motd role'              AGENT_TOOLS=read_file,list_dir,glob,grep
-make agent-ultrawork GOAL='split the motd role' \
-    AGENT_TOOLS=read_file,list_dir,glob,grep,edit_file,write_file,run_bash
+daedalus -o agent_tools=read_file,grep ask 'why does molecule fail on rocky?'
+daedalus -o agent_tools=read_file,list_dir,glob,grep hyperplan 'split the motd role'
+daedalus -o agent_tools=read_file,list_dir,glob,grep,edit_file,write_file,run_bash \
+    ultrawork 'split the motd role' -- --planners 6
 ```
 
-`AGENT_MODEL` and `AGENT_ARGS` pass `--model` and any other flags.
+`agent_tools`, `agent_model` and `agent_args` can live in the project's
+`.daedalus/config.toml` instead. Anything after `--` goes to daedalus-agent.
 
 ## Library use
 
@@ -147,8 +148,8 @@ still off until someone names it.
 ## Development
 
 ```sh
-make agent-test        # from the repo root: pytest + ruff via uv
+daedalus unit-test     # from the repo root: this module's and the agent's tests
 ```
 
 Python 3.12+ (tau's floor). `agent/requirements.txt` is the hashed lock the
-image installs from; `make lock` regenerates it.
+image installs from; `daedalus lock` regenerates it.

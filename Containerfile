@@ -1,8 +1,8 @@
 # Daedalus: everything an operator (or a fenced-in AI agent) needs to work
 # on Ansible roles and Python projects without installing anything on the host.
 #
-# Build:  make build            (see Makefile in this directory)
-# Use:    include daedalus.mk from a project Makefile, then `make shell` / `make agent`
+# Build:  python3 -m daedalus build     (the daedalus/ module in this repo)
+# Use:    daedalus shell / daedalus agent from a project (see README.md)
 
 ARG FEDORA_VERSION=44
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION}
@@ -67,7 +67,7 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Ansible toolchain in its own venv so the system python3 stays clean for
 # project venvs (uv). Entry points are symlinked onto PATH.
-# requirements-tools.txt is generated from requirements-tools.in by `make lock`.
+# requirements-tools.txt is generated from requirements-tools.in by `daedalus lock`.
 # ---------------------------------------------------------------------------
 COPY requirements-tools.txt /tmp/requirements-tools.txt
 RUN set -eux; \
@@ -81,7 +81,7 @@ RUN set -eux; \
 
 # ---------------------------------------------------------------------------
 # daedalus-agent: the tau-based AI agent (agent/). Own venv, installed from the
-# hashed lock in agent/requirements.txt (`make lock` regenerates it). It starts
+# hashed lock in agent/requirements.txt (`daedalus lock` regenerates it). It starts
 # with no tools; each one is enabled by name (-t / DAEDALUS_AGENT_TOOLS).
 # ---------------------------------------------------------------------------
 COPY agent/ /tmp/daedalus-agent/
@@ -93,6 +93,21 @@ RUN set -eux; \
     ln -sf /opt/daedalus-agent/bin/daedalus-agent /usr/local/bin/daedalus-agent; \
     rm -rf /tmp/daedalus-agent; \
     daedalus-agent tools
+
+# ---------------------------------------------------------------------------
+# The daedalus module itself (stdlib only), on the system python path, so
+# `daedalus ...` and `python3 -m daedalus ...` work inside the container too
+# (there, `daedalus run -- CMD` just runs CMD).
+# ---------------------------------------------------------------------------
+COPY daedalus/ /tmp/daedalus-cli/daedalus/
+RUN set -eux; \
+    site="$(python3 -c 'import site; print(next(p for p in site.getsitepackages() if p.startswith("/usr/local/lib/")))')"; \
+    install -d "$site"; \
+    cp -r /tmp/daedalus-cli/daedalus "$site/"; \
+    printf '#!/bin/sh\nexec /usr/bin/python3 -m daedalus "$@"\n' > /usr/local/bin/daedalus; \
+    chmod 0755 /usr/local/bin/daedalus; \
+    rm -rf /tmp/daedalus-cli; \
+    python3 -m daedalus --version
 
 # ---------------------------------------------------------------------------
 # Config, helper scripts, unprivileged user

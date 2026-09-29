@@ -1,0 +1,3 @@
+# Settings for `daedalus` in this repo (the workshop itself).
+# `daedalus config` shows every setting and its effective value.
+agent_allowlist = "ariadne/allowlist.txt"

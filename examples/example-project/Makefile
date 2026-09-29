@@ -1,14 +1,17 @@
-# Every recipe is wrapped in $(DD_RUN): from the host it runs inside the
-# daedalus container; inside the daedalus (make shell / make agent) DD_RUN is
-# empty, so the same targets run directly. One Makefile, both places.
+# The project's own tasks. Every recipe is wrapped in $(DD_RUN): from the host
+# it runs inside the daedalus container (`daedalus run --`); inside the
+# container (daedalus shell / daedalus agent) DD_RUN is empty, so the same
+# targets run directly. One Makefile, both places.
+#
+# Container settings (image pin, agent limits, agent tools) live in
+# .daedalus/config.toml and are used by the `daedalus` command.
 
-# Pin the daedalus for this repo. Bump deliberately, like a lock file.
-DAEDALUS_IMAGE  := git.example.com/ops/daedalus
-EGRESS_IMAGE   := git.example.com/ops/ariadne
-DAEDALUS_TAG    := 2026.09.1
-# DAEDALUS_DIGEST := sha256:<from `make daedalus-digest`>
-
-include daedalus.mk
+DAEDALUS ?= daedalus
+ifdef DAEDALUS_INSIDE
+DD_RUN :=
+else
+DD_RUN := $(DAEDALUS) run --
+endif
 
 ROLE     ?= motd
 BOXES    ?= ubuntu debian rocky
@@ -20,7 +23,7 @@ VAULT_ID ?= dev@/usr/local/bin/gpg-vault-client
 .PHONY: help deps lint fmt test molecule vm-up vm-test vm-provision vm-destroy vault-edit deploy
 
 help:
-	@echo "host:    make pull | shell | agent | agent-check"
+	@echo "host:    daedalus pull | shell | agent | agent-check | ask | hyperplan | ultrawork"
 	@echo "project: make deps lint fmt test molecule vm-up vm-test vm-provision vm-destroy vault-edit deploy"
 
 deps:

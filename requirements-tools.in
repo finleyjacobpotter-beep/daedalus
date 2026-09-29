@@ -1,5 +1,5 @@
 # Python tooling baked into the image's /opt/ansible venv.
-# Edit this file, then run `make lock` to regenerate requirements-tools.txt
+# Edit this file, then run `daedalus lock` to regenerate requirements-tools.txt
 # (fully pinned, with hashes). Projects that need a different ansible-core
 # can pin their own in pyproject.toml and run it with `uv run`.
 ansible-core>=2.18

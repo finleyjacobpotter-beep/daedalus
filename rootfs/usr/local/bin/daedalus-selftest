@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Smoke test run by `make test` in the daedalus repo and in CI.
+# Smoke test run by `daedalus test` in the daedalus repo and in CI.
 set -uo pipefail
 fail=0
 check() { if "$@" >/dev/null 2>&1; then printf 'ok    %s\n' "$*"; else printf 'FAIL  %s\n' "$*"; fail=1; fi; }
 
 for bin in vi vim nvim ssh ssh-agent ssh-add gpg bao fj buildah podman skopeo \
            vagrant virsh ansible ansible-playbook ansible-vault ansible-galaxy \
-           ansible-lint molecule yamllint python3 uv git rsync jq make daedalus-agent; do
+           ansible-lint molecule yamllint python3 uv git rsync jq make daedalus daedalus-agent; do
   check command -v "$bin"
 done
 check vagrant plugin list
@@ -16,6 +16,9 @@ check fj --version
 check buildah info
 check ansible-vault --help
 check daedalus-agent tools
+check python3 -m daedalus --version
+# Inside the container `daedalus run` runs the command directly.
+check bash -c '[ "$(daedalus run -- echo inside)" = inside ]'
 # The agent ships with every tool off; each must be enabled by name.
 check bash -c 'daedalus-agent tools | grep -q "None is enabled by default"'
 check bash -c 'echo test | gpg --batch --symmetric --passphrase x --pinentry-mode loopback -o /tmp/t.gpg && gpg --batch --passphrase x --pinentry-mode loopback -d /tmp/t.gpg'
