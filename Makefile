@@ -1,6 +1,7 @@
 # Build, test and publish Daedalus images.
 #   make build test          build both images locally and smoke-test
-#   make lock                re-pin requirements-tools.txt from requirements-tools.in
+#   make lock                re-pin requirements-tools.txt and agent/requirements.txt
+#   make agent-test          run the daedalus-agent unit tests (uv, no container needed)
 #   make push                push :$(TAG) (and :latest) to the registry
 #   make shell / agent       try it on this repo (daedalus.mk is included below)
 
@@ -19,7 +20,7 @@ AGENT_ALLOWLIST := $(CURDIR)/ariadne/allowlist.txt
 
 include daedalus.mk
 
-.PHONY: build build-daedalus build-ariadne test lock push
+.PHONY: build build-daedalus build-ariadne test lock push agent-test
 
 build: build-daedalus build-ariadne
 
@@ -46,7 +47,13 @@ lock:
 		registry.fedoraproject.org/fedora:$(FEDORA_VERSION) bash -c '\
 		dnf -y -q install uv python3 >/dev/null && \
 		uv pip compile --universal --generate-hashes --python /usr/bin/python3 \
-			requirements-tools.in -o requirements-tools.txt'
+			requirements-tools.in -o requirements-tools.txt && \
+		uv pip compile --universal --generate-hashes --python /usr/bin/python3 \
+			agent/pyproject.toml -o agent/requirements.txt'
+
+agent-test:
+	cd agent && uv run --python 3.12 --extra test pytest -q
+	cd agent && uvx ruff check src tests && uvx ruff format --check src tests
 
 push:
 	$(PODMAN) push $(DAEDALUS_IMAGE):$(TAG)

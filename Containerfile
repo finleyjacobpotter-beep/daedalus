@@ -80,6 +80,21 @@ RUN set -eux; \
     ansible --version
 
 # ---------------------------------------------------------------------------
+# daedalus-agent: the tau-based AI agent (agent/). Own venv, installed from the
+# hashed lock in agent/requirements.txt (`make lock` regenerates it). It starts
+# with no tools; each one is enabled by name (-t / DAEDALUS_AGENT_TOOLS).
+# ---------------------------------------------------------------------------
+COPY agent/ /tmp/daedalus-agent/
+RUN set -eux; \
+    uv venv --python /usr/bin/python3 /opt/daedalus-agent; \
+    uv pip install --python /opt/daedalus-agent/bin/python --no-cache --require-hashes \
+        -r /tmp/daedalus-agent/requirements.txt; \
+    uv pip install --python /opt/daedalus-agent/bin/python --no-cache --no-deps /tmp/daedalus-agent; \
+    ln -sf /opt/daedalus-agent/bin/daedalus-agent /usr/local/bin/daedalus-agent; \
+    rm -rf /tmp/daedalus-agent; \
+    daedalus-agent tools
+
+# ---------------------------------------------------------------------------
 # Config, helper scripts, unprivileged user
 # ---------------------------------------------------------------------------
 COPY rootfs/ /

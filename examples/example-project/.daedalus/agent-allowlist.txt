@@ -13,5 +13,6 @@ galaxy.ansible.com
 # Your forge over HTTPS (push is still impossible: .git is mounted read-only)
 git.example.com
 
-# The agent's own model API - uncomment what your agent uses
+# The agent's own model API - uncomment what daedalus-agent (or your agent) uses
 # api.anthropic.com
+# api.openai.com

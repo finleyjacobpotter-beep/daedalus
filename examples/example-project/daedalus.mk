@@ -9,6 +9,9 @@
 #   make agent           (alias: make labyrinth) fenced shell for AI agents: allowlisted HTTPS egress only, no host secrets
 #   make agent-check     prove the fence works (allowed host OK, others blocked)
 #   make agent-down      stop the egress proxy and remove the agent network
+#   make agent-ask GOAL='...'        daedalus-agent: one agent, AGENT_TOOLS only
+#   make agent-hyperplan GOAL='...'  daedalus-agent: a planning team writes a plan
+#   make agent-ultrawork GOAL='...'  daedalus-agent: plan and build with agent teams
 #
 # Project Makefiles can use $(DD_RUN) to run a target inside the daedalus, e.g.
 #   test: ; $(DD_RUN) make test        (see the example project)
@@ -44,8 +47,16 @@ AGENT_MEMORY    ?= 8g
 AGENT_CPUS      ?= 4
 AGENT_PIDS      ?= 4096
 # Host env vars passed into the agent container by name (values never hit the command line).
-AGENT_ENV       ?= ANTHROPIC_API_KEY
+# Unset ones are simply not passed.
+AGENT_ENV       ?= ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY OPENAI_BASE_URL \
+                   DAEDALUS_AGENT_MODEL DAEDALUS_AGENT_TOOLS
 AGENT_CMD       ?= bash -l
+# daedalus-agent: tools are OFF unless listed here (comma-separated), e.g.
+#   AGENT_TOOLS := read_file,list_dir,glob,grep,edit_file,write_file,run_bash
+# `daedalus-agent tools` lists them all. AGENT_MODEL is provider:model.
+AGENT_TOOLS     ?=
+AGENT_MODEL     ?=
+AGENT_ARGS      ?=
 
 # --------------------------------------------------------------------------
 _ref      = $(if $(DAEDALUS_DIGEST),$(DAEDALUS_IMAGE)@$(DAEDALUS_DIGEST),$(DAEDALUS_IMAGE):$(DAEDALUS_TAG))
@@ -106,7 +117,8 @@ _agent = -e DAEDALUS_MODE=agent \
 # Use in project recipes: $(DD_RUN) <command>
 DD_RUN = $(PODMAN) run $(_common) $(_operator) $(_ref)
 
-.PHONY: pull shell run agent labyrinth agent-up agent-down agent-check daedalus-digest daedalus-clean
+.PHONY: pull shell run agent labyrinth agent-up agent-down agent-check daedalus-digest daedalus-clean \
+	agent-ask agent-hyperplan agent-ultrawork
 
 pull:
 	$(PODMAN) pull $(_ref)
@@ -149,6 +161,15 @@ endef
 
 agent labyrinth: agent-up
 	@$(_agent_run) $(AGENT_CMD)
+
+# daedalus-agent inside the fence. GOAL is single-quoted for the shell.
+_agent_goal = '$(subst ','\'',$(GOAL))'
+_agent_usage = echo "usage: make $@ GOAL='...' [AGENT_TOOLS=read_file,grep,...]"; exit 2
+_agent_opts = $(if $(AGENT_TOOLS),--tool $(AGENT_TOOLS)) $(if $(AGENT_MODEL),--model $(AGENT_MODEL)) $(AGENT_ARGS)
+
+agent-ask agent-hyperplan agent-ultrawork: agent-up
+	@$(if $(strip $(GOAL)),:,$(_agent_usage))
+	@$(_agent_run) daedalus-agent $(patsubst agent-%,%,$(subst agent-ask,agent-run,$@)) $(_agent_opts) $(_agent_goal)
 
 agent-check: agent-up
 	@allowed=$$(grep -v '^\s*#' "$(AGENT_ALLOWLIST)" | grep -v '^\s*$$' | head -n1 | sed 's/^\.//'); \

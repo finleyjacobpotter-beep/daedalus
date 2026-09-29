@@ -6,7 +6,7 @@ check() { if "$@" >/dev/null 2>&1; then printf 'ok    %s\n' "$*"; else printf 'F
 
 for bin in vi vim nvim ssh ssh-agent ssh-add gpg bao fj buildah podman skopeo \
            vagrant virsh ansible ansible-playbook ansible-vault ansible-galaxy \
-           ansible-lint molecule yamllint python3 uv git rsync jq make; do
+           ansible-lint molecule yamllint python3 uv git rsync jq make daedalus-agent; do
   check command -v "$bin"
 done
 check vagrant plugin list
@@ -15,6 +15,9 @@ check bao version
 check fj --version
 check buildah info
 check ansible-vault --help
+check daedalus-agent tools
+# The agent ships with every tool off; each must be enabled by name.
+check bash -c 'daedalus-agent tools | grep -q "None is enabled by default"'
 check bash -c 'echo test | gpg --batch --symmetric --passphrase x --pinentry-mode loopback -o /tmp/t.gpg && gpg --batch --passphrase x --pinentry-mode loopback -d /tmp/t.gpg'
 
 if [[ "${DAEDALUS_SELFTEST_BUILD:-0}" == 1 ]]; then

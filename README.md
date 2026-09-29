@@ -9,6 +9,7 @@ podman and make, plus libvirtd if you want VM tests.
 | **daedalus** | the workshop image (`Containerfile`) and `daedalus.mk`, which projects include |
 | **labyrinth** | the internal network an AI agent session is confined to (`make agent` / `make labyrinth`) |
 | **ariadne** | the egress proxy (`ariadne/`): the one thread out of the labyrinth, allowlisted domains only |
+| **daedalus-agent** | the AI agent (`agent/`), built on [tau](https://github.com/huggingface/tau): no tools unless named, plus hyper planning and ultrawork agent teams |
 
 | Need | Provided by |
 |---|---|
@@ -21,11 +22,13 @@ podman and make, plus libvirtd if you want VM tests.
 | VM tests | `vagrant` + `vagrant-libvirt` (Fedora packages) talking to the host libvirtd socket; bento boxes |
 | Ansible | ansible-core, ansible-lint, molecule + vagrant driver, yamllint, hvac in `/opt/ansible` |
 | Python | system python3 + `uv` for per-project venvs |
+| AI agent | `daedalus-agent` (tau) in `/opt/daedalus-agent`; see [agent/README.md](agent/README.md) |
 
 ## Build and publish
 
 ```sh
-make lock              # pin requirements-tools.txt (hashes) from requirements-tools.in
+make lock              # pin requirements-tools.txt and agent/requirements.txt (hashes)
+make agent-test        # unit tests for daedalus-agent (uv, no container)
 make build test        # build both images, run daedalus-selftest (incl. a nested buildah build)
 make push REGISTRY=git.example.com/ops TAG=2026.09.1
 ```
@@ -60,6 +63,24 @@ owned by you.
   review and commit. This also keeps it from planting git hooks that would
   later run on your host.
 
+### The agent
+
+`daedalus-agent` is baked into the image. It starts with **no tools**; you
+enable each one by name. Add your model API host to the allowlist, then:
+
+```sh
+make agent-ask       GOAL='explain the motd role' AGENT_TOOLS=read_file,list_dir,grep
+make agent-hyperplan GOAL='add a role for chrony' AGENT_TOOLS=read_file,list_dir,glob,grep
+make agent-ultrawork GOAL='add a role for chrony, with molecule tests' \
+    AGENT_TOOLS=read_file,list_dir,glob,grep,write_file,edit_file,run_bash
+```
+
+**Hyper planning** has parallel researchers, competing planners, critics
+and reviewers produce one dependency-ordered plan. **Ultrawork** executes
+that plan with a team of workers, runs independent tasks in parallel, has a
+verifier check each one (rejected work is retried with feedback) and ends
+with an integration pass. Details: [agent/README.md](agent/README.md).
+
 Run `make agent-check` to prove the fence. To find blocked hosts, run
 `podman logs ariadne-<project> | grep DENIED`.
 
@@ -72,7 +93,7 @@ Run `make agent-check` to prove the fence. To find blocked hosts, run
   dedicated profile, knowing what that costs.
 - **Tools must honour `HTTPS_PROXY` in agent mode.** SSH to the forge doesn't
   work there; use HTTPS.
-- **Adding an AI CLI.** Layer it: `FROM daedalus`, install the CLI,
+- **Adding another AI CLI.** Layer it: `FROM daedalus`, install the CLI,
   set `AGENT_CMD`, and add its API host to the allowlist.
 - **Libvirt socket permissions.** If the socket is group-restricted rather
   than polkit-managed, set `LIBVIRT_KEEP_GROUPS=1`.
