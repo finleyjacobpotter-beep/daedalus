@@ -1,8 +1,0 @@
----
-- name: Converge
-  hosts: all
-  become: true
-  roles:
-    - role: motd
-      vars:
-        motd_owner: molecule@example.com

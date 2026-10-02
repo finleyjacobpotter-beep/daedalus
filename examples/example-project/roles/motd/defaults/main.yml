@@ -1,3 +1,0 @@
----
-motd_owner: ops@example.com
-motd_message: "Managed by Ansible. Local changes will be overwritten."

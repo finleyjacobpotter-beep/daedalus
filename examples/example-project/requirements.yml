@@ -1,5 +1,0 @@
----
-collections:
-  - name: ansible.posix
-  - name: community.general
-  - name: community.hashi_vault   # hashi_vault lookups work against OpenBao

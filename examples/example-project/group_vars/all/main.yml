@@ -1,3 +1,0 @@
----
-motd_owner: "{{ vault_motd_owner | default('ops@example.com') }}"
-# group_vars/all/vault.yml holds vault_* variables (ansible-vault encrypted)

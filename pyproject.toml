@@ -1,0 +1,17 @@
+[project]
+name = "daedalus"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "fp", email = "fp@localhost.local" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+daedalus = "daedalus:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"

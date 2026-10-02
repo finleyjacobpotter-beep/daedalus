@@ -1,6 +1,0 @@
-# Default allowlist baked into the egress image. Projects override it with
-# .daedalus/agent-allowlist.txt (mounted over this file).
-# Squid dstdomain syntax: a leading dot matches the domain and all subdomains.
-# Do not list both "example.com" and ".example.com" - squid refuses to start.
-.pypi.org
-files.pythonhosted.org
