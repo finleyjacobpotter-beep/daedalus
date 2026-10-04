@@ -5,18 +5,19 @@ Install: pip install podman
 """
 
 import argparse
-import codecs
 import io
 import json
 import sys
 from datetime import datetime
 import os
-import shlex
+import shutil
+import subprocess
 import podman
 from podman.errors import BuildError
-from prompt_toolkit import PromptSession
-from prompt_toolkit.history import InMemoryHistory
 
+
+# Home directory inside the container; mounted as a tmpfs since the root filesystem is read-only
+CONTAINER_HOME = "/home/podman"
 
 CONTAINERFILE = r"""FROM alpine:latest
 
@@ -54,88 +55,6 @@ def print_build_log(line):
     text = entry.get("stream") or entry.get("error")
     if text:
         print(text.rstrip())
-
-
-class ContainerShell:
-    """Interactive prompt that runs each command in a container via exec."""
-
-    # Separates command output from the exit code and cwd appended after it
-    MARKER = "\x1e"
-
-    def __init__(self, container, cwd="/"):
-        self.container = container
-        self.cwd = cwd
-        self.status = 0
-        self.session = PromptSession(history=InMemoryHistory())
-
-    def prompt(self):
-        mark = "$" if self.status == 0 else f"[{self.status}]$"
-        return f"{self.container.name}:{os.path.basename(self.cwd) or '/'} {mark} "
-
-    def execute(self, command):
-        """Run one command in the shell's cwd, streaming its output."""
-        script = (
-            f"cd {shlex.quote(self.cwd)} || exit\n"
-            f"{command}\n"
-            f"printf '{self.MARKER}%s %s' \"$?\" \"$PWD\""
-        )
-        _, frames = self.container.exec_run(
-            ["/bin/sh", "-c", script], stream=True, demux=True
-        )
-
-        out = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        err = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        trailer = None
-        last = "\n"
-        for stdout, stderr in frames:
-            if stderr:
-                sys.stderr.write(err.decode(stderr))
-                sys.stderr.flush()
-            if not stdout:
-                continue
-            text = out.decode(stdout)
-            if trailer is not None:
-                trailer += text
-                continue
-            before, sep, after = text.partition(self.MARKER)
-            sys.stdout.write(before)
-            sys.stdout.flush()
-            last = before[-1:] or last
-            if sep:
-                trailer = after
-
-        if last != "\n":
-            print()
-
-        if trailer is None:
-            # The shell exited before reaching the marker (e.g. the command ran `exit`)
-            self.status = 1
-            return
-        status, _, cwd = trailer.partition(" ")
-        self.status = int(status) if status.isdigit() else 1
-        self.cwd = cwd or self.cwd
-
-    def loop(self):
-        print("Type commands to run in the container; Ctrl-D or 'exit' to quit.")
-        while True:
-            try:
-                command = self.session.prompt(self.prompt())
-            except KeyboardInterrupt:
-                continue
-            except EOFError:
-                break
-
-            command = command.strip()
-            if not command:
-                continue
-            if command in ("exit", "logout"):
-                break
-            try:
-                self.execute(command)
-            except KeyboardInterrupt:
-                # Stop waiting on output; the command itself keeps running in the container
-                print()
-                self.status = 130
 
 
 class LabelBasedContainerManager:
@@ -179,8 +98,8 @@ class LabelBasedContainerManager:
 
     def run(self, pwd=None, hostname=None, name=None, remove=False):
         """
-        Start a container with labels for stateless management and open an
-        interactive shell that runs each command in it via exec.
+        Start a container with labels for stateless management and attach an
+        interactive shell to it with `podman exec -it`.
 
         Args:
             pwd: Working directory to mount/identify
@@ -207,25 +126,52 @@ class LabelBasedContainerManager:
             "app.created": datetime.now().isoformat(),
         }
 
+        podman_cli = shutil.which("podman")
+        if podman_cli is None:
+            print("Error: the podman CLI is required for an interactive shell", file=sys.stderr)
+            return False
+
         try:
-            # Keep the container alive in the background; the shell talks to it via exec
+            # Keep the container alive in the background; the shell attaches via exec
             container = self.client.containers.run(
                 image=f"{self.app_name}:latest",
                 name=name,
                 entrypoint=["sleep", "infinity"],
+                init=True,  # Forward the stop signal so the container exits promptly
                 detach=True,
                 read_only=True,
                 cap_drop=["all"],
                 security_opt=["no-new-privileges=true"],
                 labels=labels,
+                # Run as the host user so files written to pwd are owned by them
+                userns_mode="keep-id",
+                user=f"{os.getuid()}:{os.getgid()}",
+                environment={"HOME": CONTAINER_HOME},
+                mounts=[{
+                    "type": "tmpfs",
+                    "source": "tmpfs",
+                    "target": CONTAINER_HOME,
+                    "chown": True,
+                }],
+                working_dir=pwd,
                 volumes={pwd: {"bind": pwd, "mode": "rw"}},  # Mount pwd as writable
             )
         except Exception as e:
             print(f"Error running container: {e}", file=sys.stderr)
             return False
 
+        # Talk to the same podman service as the API client
+        command = [podman_cli]
+        host = os.getenv("CONTAINER_HOST") or os.getenv("DOCKER_HOST")
+        if host:
+            command += ["--url", host]
+        command += ["exec", "-it", "--workdir", pwd]
+        if os.getenv("TERM"):
+            command += ["--env", f"TERM={os.environ['TERM']}"]
+        command += [container.id, "/bin/sh", "-l"]
+
         try:
-            ContainerShell(container, cwd=pwd).loop()
+            subprocess.run(command, check=False)
             return True
 
         except Exception as e:
