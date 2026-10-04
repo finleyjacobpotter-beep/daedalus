@@ -5,13 +5,17 @@ Install: pip install podman
 """
 
 import argparse
+import codecs
 import io
 import json
 import sys
 from datetime import datetime
 import os
+import shlex
 import podman
 from podman.errors import BuildError
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
 
 
 CONTAINERFILE = r"""FROM alpine:latest
@@ -50,6 +54,88 @@ def print_build_log(line):
     text = entry.get("stream") or entry.get("error")
     if text:
         print(text.rstrip())
+
+
+class ContainerShell:
+    """Interactive prompt that runs each command in a container via exec."""
+
+    # Separates command output from the exit code and cwd appended after it
+    MARKER = "\x1e"
+
+    def __init__(self, container, cwd="/"):
+        self.container = container
+        self.cwd = cwd
+        self.status = 0
+        self.session = PromptSession(history=InMemoryHistory())
+
+    def prompt(self):
+        mark = "$" if self.status == 0 else f"[{self.status}]$"
+        return f"{self.container.name}:{os.path.basename(self.cwd) or '/'} {mark} "
+
+    def execute(self, command):
+        """Run one command in the shell's cwd, streaming its output."""
+        script = (
+            f"cd {shlex.quote(self.cwd)} || exit\n"
+            f"{command}\n"
+            f"printf '{self.MARKER}%s %s' \"$?\" \"$PWD\""
+        )
+        _, frames = self.container.exec_run(
+            ["/bin/sh", "-c", script], stream=True, demux=True
+        )
+
+        out = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        err = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        trailer = None
+        last = "\n"
+        for stdout, stderr in frames:
+            if stderr:
+                sys.stderr.write(err.decode(stderr))
+                sys.stderr.flush()
+            if not stdout:
+                continue
+            text = out.decode(stdout)
+            if trailer is not None:
+                trailer += text
+                continue
+            before, sep, after = text.partition(self.MARKER)
+            sys.stdout.write(before)
+            sys.stdout.flush()
+            last = before[-1:] or last
+            if sep:
+                trailer = after
+
+        if last != "\n":
+            print()
+
+        if trailer is None:
+            # The shell exited before reaching the marker (e.g. the command ran `exit`)
+            self.status = 1
+            return
+        status, _, cwd = trailer.partition(" ")
+        self.status = int(status) if status.isdigit() else 1
+        self.cwd = cwd or self.cwd
+
+    def loop(self):
+        print("Type commands to run in the container; Ctrl-D or 'exit' to quit.")
+        while True:
+            try:
+                command = self.session.prompt(self.prompt())
+            except KeyboardInterrupt:
+                continue
+            except EOFError:
+                break
+
+            command = command.strip()
+            if not command:
+                continue
+            if command in ("exit", "logout"):
+                break
+            try:
+                self.execute(command)
+            except KeyboardInterrupt:
+                # Stop waiting on output; the command itself keeps running in the container
+                print()
+                self.status = 130
 
 
 class LabelBasedContainerManager:
@@ -91,57 +177,66 @@ class LabelBasedContainerManager:
             print(f"Error building image: {e}", file=sys.stderr)
             return False
 
-    def run(self, pwd=None, hostname=None, name=None, interactive=True, remove=False):
+    def run(self, pwd=None, hostname=None, name=None, remove=False):
         """
-        Run container with labels for stateless management.
-        
+        Start a container with labels for stateless management and open an
+        interactive shell that runs each command in it via exec.
+
         Args:
             pwd: Working directory to mount/identify
             hostname: Identifier for this container (e.g., user@machine)
             name: Container name
-            interactive: Run interactively
-            remove: Remove container after exit
+            remove: Remove container after the shell exits
         """
         if pwd is None:
             pwd = os.getcwd()
-        
+        pwd = os.path.abspath(pwd)
+
         if hostname is None:
             hostname = f"{os.getenv('USER', 'user')}@{os.getenv('HOSTNAME', 'container')}"
-        
+
         print(f"Running container from {self.app_name}")
         print(f"Working directory: {pwd}")
         print(f"Hostname: {hostname}")
-        
+
+        # Build labels for discovery
+        labels = {
+            **self.base_labels,
+            "app.pwd": pwd,
+            "app.hostname": hostname,
+            "app.created": datetime.now().isoformat(),
+        }
+
         try:
-            # Build labels for discovery
-            labels = {
-                **self.base_labels,
-                "app.pwd": pwd,
-                "app.hostname": hostname,
-                "app.created": datetime.now().isoformat(),
-            }
-            
-            # Run the container
+            # Keep the container alive in the background; the shell talks to it via exec
             container = self.client.containers.run(
                 image=f"{self.app_name}:latest",
                 name=name,
-                tty=interactive,
-                stdin_open=interactive,
-                detach=False,
-                rm=remove,
+                entrypoint=["sleep", "infinity"],
+                detach=True,
                 read_only=True,
                 cap_drop=["all"],
                 security_opt=["no-new-privileges=true"],
                 labels=labels,
                 volumes={pwd: {"bind": pwd, "mode": "rw"}},  # Mount pwd as writable
             )
-            
-            print(f"✓ Container exited")
-            return True
-        
         except Exception as e:
             print(f"Error running container: {e}", file=sys.stderr)
             return False
+
+        try:
+            ContainerShell(container, cwd=pwd).loop()
+            return True
+
+        except Exception as e:
+            print(f"Error in container shell: {e}", file=sys.stderr)
+            return False
+
+        finally:
+            container.stop(timeout=1)
+            if remove:
+                container.remove(force=True)
+            print("✓ Container exited")
 
     def list_containers(self, filter_by_hostname=None):
         """List all containers managed by this app (via labels)."""
@@ -344,6 +439,12 @@ def main():
     )
     
     parser.add_argument(
+        "--rm",
+        action="store_true",
+        help="Remove the container when the run shell exits"
+    )
+    
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Force remove containers"
@@ -363,7 +464,8 @@ def main():
             success = manager.run(
                 pwd=args.pwd,
                 hostname=args.hostname,
-                name=args.name
+                name=args.name,
+                remove=args.rm
             )
         
         elif args.action == "list":
