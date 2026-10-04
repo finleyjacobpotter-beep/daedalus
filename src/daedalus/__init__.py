@@ -1,50 +1,92 @@
 #!/usr/bin/env python3
 """
 Stateless container manager using podman-py with label-based discovery.
-Install: pip install podman-py
+Install: pip install podman
 """
 
 import argparse
+import io
+import json
 import sys
-from pathlib import Path
 from datetime import datetime
 import os
 import podman
+from podman.errors import BuildError
+
+
+CONTAINERFILE = r"""FROM alpine:latest
+
+RUN apk add --no-cache \
+    neovim git podman nix shadow tmux
+
+RUN addgroup -S podman && \
+    adduser -S podman -G podman && \
+    mkdir -p /home/podman && \
+    chown -R podman /home/podman
+
+WORKDIR /home/podman
+USER podman
+
+VOLUME ["/tmp"]
+ENTRYPOINT ["/bin/sh", "-i"]
+
+LABEL \
+    app.name="alpine-dev" \
+    app.version="1.0" \
+    app.description="Secure Alpine dev container" \
+    app.managed="true"
+"""
+
+
+def print_build_log(line):
+    """Print one line of podman's JSON build output."""
+    if isinstance(line, bytes):
+        line = line.decode(errors="replace")
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        print(line.rstrip())
+        return
+    text = entry.get("stream") or entry.get("error")
+    if text:
+        print(text.rstrip())
 
 
 class LabelBasedContainerManager:
     def __init__(self, app_name="alpine-dev"):
         """Initialize with app identifier."""
         self.app_name = app_name
-        self.client = podman.PodmanClient()
+        self.client = podman.PodmanClient.from_env()
         self.base_labels = {
             "app.name": app_name,
             "app.managed": "true"
         }
 
-    def build(self, dockerfile_path="Containerfile", tag="latest"):
-        """Build the container image."""
+    def build(self, tag="latest"):
+        """Build the container image from the embedded CONTAINERFILE."""
         full_image = f"{self.app_name}:{tag}"
         print(f"Building image: {full_image}")
-        
-        if not Path(dockerfile_path).exists():
-            print(f"Error: {dockerfile_path} not found", file=sys.stderr)
-            return False
 
         try:
             image, build_logs = self.client.images.build(
-                dockerfile=dockerfile_path,
+                fileobj=io.StringIO(CONTAINERFILE),
+                dockerfile="Containerfile",
                 tag=full_image,
-                path="."
+                labels=self.base_labels,
             )
-            
-            for log in build_logs:
-                if "stream" in log:
-                    print(log["stream"].strip())
-            
-            print(f"✓ Image built successfully: {full_image}")
+
+            for line in build_logs:
+                print_build_log(line)
+
+            print(f"✓ Image built successfully: {full_image} ({image.short_id})")
             return True
-        
+
+        except BuildError as e:
+            for line in e.build_log:
+                print_build_log(line)
+            print(f"Error building image: {e}", file=sys.stderr)
+            return False
+
         except Exception as e:
             print(f"Error building image: {e}", file=sys.stderr)
             return False
@@ -267,12 +309,6 @@ def main():
     )
     
     parser.add_argument(
-        "--dockerfile",
-        default="Containerfile",
-        help="Dockerfile path (default: Containerfile)"
-    )
-    
-    parser.add_argument(
         "--pwd",
         help="Working directory to mount/identify (default: current directory)"
     )
@@ -321,7 +357,7 @@ def main():
     
     try:
         if args.action == "build":
-            success = manager.build(args.dockerfile, args.tag)
+            success = manager.build(args.tag)
         
         elif args.action == "run":
             success = manager.run(
