@@ -8,3 +8,12 @@ if [ $? -eq 2 ]; then
     rm -f "$SSH_AUTH_SOCK"
     eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
 fi
+
+# Prompt for DAEDALUS_SECRET without echoing it and export it for this shell.
+# The value only lives in the environment; nothing is written to disk.
+set_daedalus_secret() {
+    local secret
+    read -r -s -p "DAEDALUS_SECRET: " secret
+    echo
+    export DAEDALUS_SECRET="$secret"
+}
