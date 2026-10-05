@@ -7,7 +7,9 @@ authors = [
     { name = "fp", email = "fp@localhost.local" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "podman>=5.0",
+]
 
 [project.scripts]
 daedalus = "daedalus:main"
