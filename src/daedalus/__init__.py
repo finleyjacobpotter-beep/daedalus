@@ -1,105 +1,221 @@
 #!/usr/bin/env python3
 """
 Stateless container manager using podman-py with label-based discovery.
-Install: pip install podman-py
+Install: pip install podman
 """
 
 import argparse
+import json
 import sys
-from pathlib import Path
 from datetime import datetime
 import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 import podman
+from podman.errors import BuildError
+
+
+# Home directory inside the container; mounted as a tmpfs since the root filesystem is read-only
+CONTAINER_HOME = "/home/podman"
+
+CONTAINERFILE = r"""FROM alpine:latest
+
+RUN apk add --no-cache \
+    bash neovim git openssh-client podman nix shadow tmux
+
+RUN addgroup -S podman && \
+    adduser -S podman -G podman && \
+    mkdir -p /home/podman && \
+    chown -R podman /home/podman
+
+# System-wide, because HOME is a tmpfs at run time and would hide ~/.gitconfig
+RUN git config --system user.name "daedalus" && \
+    git config --system user.email "daedalus@localhost.local"
+
+# Login shells source /etc/profile.d, which survives the tmpfs HOME
+COPY daedalus.sh /etc/profile.d/daedalus.sh
+
+WORKDIR /home/podman
+USER podman
+
+VOLUME ["/tmp"]
+ENTRYPOINT ["/bin/bash", "-l"]
+
+LABEL \
+    app.name="alpine-dev" \
+    app.version="1.0" \
+    app.description="Secure Alpine dev container" \
+    app.managed="true"
+"""
+
+# Installed as /etc/profile.d/daedalus.sh and sourced by the login shell
+PROFILE_SCRIPT = r"""# daedalus container shell setup
+
+# Start an ssh-agent, or reuse the one already running on the shared socket.
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-$HOME/.ssh}/agent.sock"
+ssh-add -l >/dev/null 2>&1
+if [ $? -eq 2 ]; then
+    mkdir -p -m 700 "$(dirname "$SSH_AUTH_SOCK")"
+    rm -f "$SSH_AUTH_SOCK"
+    eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+fi
+
+# Prompt for DAEDALUS_SECRET without echoing it and export it for this shell.
+# The value only lives in the environment; nothing is written to disk.
+set_daedalus_secret() {
+    local secret
+    read -r -s -p "DAEDALUS_SECRET: " secret
+    echo
+    export DAEDALUS_SECRET="$secret"
+}
+"""
+
+
+def print_build_log(line):
+    """Print one line of podman's JSON build output."""
+    if isinstance(line, bytes):
+        line = line.decode(errors="replace")
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        print(line.rstrip())
+        return
+    text = entry.get("stream") or entry.get("error")
+    if text:
+        print(text.rstrip())
 
 
 class LabelBasedContainerManager:
     def __init__(self, app_name="alpine-dev"):
         """Initialize with app identifier."""
         self.app_name = app_name
-        self.client = podman.PodmanClient()
+        self.client = podman.PodmanClient.from_env()
         self.base_labels = {
             "app.name": app_name,
             "app.managed": "true"
         }
 
-    def build(self, dockerfile_path="Containerfile", tag="latest"):
-        """Build the container image."""
+    def build(self, tag="latest"):
+        """Build the container image from the embedded CONTAINERFILE and PROFILE_SCRIPT."""
         full_image = f"{self.app_name}:{tag}"
         print(f"Building image: {full_image}")
-        
-        if not Path(dockerfile_path).exists():
-            print(f"Error: {dockerfile_path} not found", file=sys.stderr)
-            return False
 
         try:
-            image, build_logs = self.client.images.build(
-                dockerfile=dockerfile_path,
-                tag=full_image,
-                path="."
-            )
-            
-            for log in build_logs:
-                if "stream" in log:
-                    print(log["stream"].strip())
-            
-            print(f"✓ Image built successfully: {full_image}")
+            with tempfile.TemporaryDirectory() as context:
+                Path(context, "Containerfile").write_text(CONTAINERFILE)
+                Path(context, "daedalus.sh").write_text(PROFILE_SCRIPT)
+                image, build_logs = self.client.images.build(
+                    path=context,
+                    dockerfile="Containerfile",
+                    tag=full_image,
+                    labels=self.base_labels,
+                )
+
+            for line in build_logs:
+                print_build_log(line)
+
+            print(f"✓ Image built successfully: {full_image} ({image.short_id})")
             return True
-        
+
+        except BuildError as e:
+            for line in e.build_log:
+                print_build_log(line)
+            print(f"Error building image: {e}", file=sys.stderr)
+            return False
+
         except Exception as e:
             print(f"Error building image: {e}", file=sys.stderr)
             return False
 
-    def run(self, pwd=None, hostname=None, name=None, interactive=True, remove=False):
+    def run(self, pwd=None, hostname=None, name=None, remove=False):
         """
-        Run container with labels for stateless management.
-        
+        Start a container with labels for stateless management and attach an
+        interactive shell to it with `podman exec -it`.
+
         Args:
             pwd: Working directory to mount/identify
             hostname: Identifier for this container (e.g., user@machine)
             name: Container name
-            interactive: Run interactively
-            remove: Remove container after exit
+            remove: Remove container after the shell exits
         """
         if pwd is None:
             pwd = os.getcwd()
-        
+        pwd = os.path.abspath(pwd)
+
         if hostname is None:
             hostname = f"{os.getenv('USER', 'user')}@{os.getenv('HOSTNAME', 'container')}"
-        
+
         print(f"Running container from {self.app_name}")
         print(f"Working directory: {pwd}")
         print(f"Hostname: {hostname}")
-        
+
+        # Build labels for discovery
+        labels = {
+            **self.base_labels,
+            "app.pwd": pwd,
+            "app.hostname": hostname,
+            "app.created": datetime.now().isoformat(),
+        }
+
+        podman_cli = shutil.which("podman")
+        if podman_cli is None:
+            print("Error: the podman CLI is required for an interactive shell", file=sys.stderr)
+            return False
+
         try:
-            # Build labels for discovery
-            labels = {
-                **self.base_labels,
-                "app.pwd": pwd,
-                "app.hostname": hostname,
-                "app.created": datetime.now().isoformat(),
-            }
-            
-            # Run the container
+            # Keep the container alive in the background; the shell attaches via exec
             container = self.client.containers.run(
                 image=f"{self.app_name}:latest",
                 name=name,
-                tty=interactive,
-                stdin_open=interactive,
-                detach=False,
-                rm=remove,
+                entrypoint=["sleep", "infinity"],
+                init=True,  # Forward the stop signal so the container exits promptly
+                detach=True,
                 read_only=True,
                 cap_drop=["all"],
                 security_opt=["no-new-privileges=true"],
                 labels=labels,
+                # Run as the host user so files written to pwd are owned by them
+                userns_mode="keep-id",
+                user=f"{os.getuid()}:{os.getgid()}",
+                environment={"HOME": CONTAINER_HOME},
+                mounts=[{
+                    "type": "tmpfs",
+                    "source": "tmpfs",
+                    "target": CONTAINER_HOME,
+                    "chown": True,
+                }],
+                working_dir=pwd,
                 volumes={pwd: {"bind": pwd, "mode": "rw"}},  # Mount pwd as writable
             )
-            
-            print(f"✓ Container exited")
-            return True
-        
         except Exception as e:
             print(f"Error running container: {e}", file=sys.stderr)
             return False
+
+        # Talk to the same podman service as the API client
+        command = [podman_cli]
+        host = os.getenv("CONTAINER_HOST") or os.getenv("DOCKER_HOST")
+        if host:
+            command += ["--url", host]
+        command += ["exec", "-it", "--workdir", pwd]
+        if os.getenv("TERM"):
+            command += ["--env", f"TERM={os.environ['TERM']}"]
+        command += [container.id, "/bin/bash", "-l"]
+
+        try:
+            subprocess.run(command, check=False)
+            return True
+
+        except Exception as e:
+            print(f"Error in container shell: {e}", file=sys.stderr)
+            return False
+
+        finally:
+            container.stop(timeout=1)
+            if remove:
+                container.remove(force=True)
+            print("✓ Container exited")
 
     def list_containers(self, filter_by_hostname=None):
         """List all containers managed by this app (via labels)."""
@@ -267,12 +383,6 @@ def main():
     )
     
     parser.add_argument(
-        "--dockerfile",
-        default="Containerfile",
-        help="Dockerfile path (default: Containerfile)"
-    )
-    
-    parser.add_argument(
         "--pwd",
         help="Working directory to mount/identify (default: current directory)"
     )
@@ -308,6 +418,12 @@ def main():
     )
     
     parser.add_argument(
+        "--rm",
+        action="store_true",
+        help="Remove the container when the run shell exits"
+    )
+    
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Force remove containers"
@@ -321,13 +437,14 @@ def main():
     
     try:
         if args.action == "build":
-            success = manager.build(args.dockerfile, args.tag)
+            success = manager.build(args.tag)
         
         elif args.action == "run":
             success = manager.run(
                 pwd=args.pwd,
                 hostname=args.hostname,
-                name=args.name
+                name=args.name,
+                remove=args.rm
             )
         
         elif args.action == "list":
