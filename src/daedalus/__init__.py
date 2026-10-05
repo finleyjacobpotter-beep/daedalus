@@ -5,13 +5,14 @@ Install: pip install podman
 """
 
 import argparse
-import io
 import json
 import sys
 from datetime import datetime
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 import podman
 from podman.errors import BuildError
 
@@ -22,24 +23,53 @@ CONTAINER_HOME = "/home/podman"
 CONTAINERFILE = r"""FROM alpine:latest
 
 RUN apk add --no-cache \
-    neovim git podman nix shadow tmux
+    bash neovim git openssh-client podman nix shadow tmux
 
 RUN addgroup -S podman && \
     adduser -S podman -G podman && \
     mkdir -p /home/podman && \
     chown -R podman /home/podman
 
+# System-wide, because HOME is a tmpfs at run time and would hide ~/.gitconfig
+RUN git config --system user.name "daedalus" && \
+    git config --system user.email "daedalus@localhost.local"
+
+# Login shells source /etc/profile.d, which survives the tmpfs HOME
+COPY daedalus.sh /etc/profile.d/daedalus.sh
+
 WORKDIR /home/podman
 USER podman
 
 VOLUME ["/tmp"]
-ENTRYPOINT ["/bin/sh", "-i"]
+ENTRYPOINT ["/bin/bash", "-l"]
 
 LABEL \
     app.name="alpine-dev" \
     app.version="1.0" \
     app.description="Secure Alpine dev container" \
     app.managed="true"
+"""
+
+# Installed as /etc/profile.d/daedalus.sh and sourced by the login shell
+PROFILE_SCRIPT = r"""# daedalus container shell setup
+
+# Start an ssh-agent, or reuse the one already running on the shared socket.
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-$HOME/.ssh}/agent.sock"
+ssh-add -l >/dev/null 2>&1
+if [ $? -eq 2 ]; then
+    mkdir -p -m 700 "$(dirname "$SSH_AUTH_SOCK")"
+    rm -f "$SSH_AUTH_SOCK"
+    eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+fi
+
+# Prompt for DAEDALUS_SECRET without echoing it and export it for this shell.
+# The value only lives in the environment; nothing is written to disk.
+set_daedalus_secret() {
+    local secret
+    read -r -s -p "DAEDALUS_SECRET: " secret
+    echo
+    export DAEDALUS_SECRET="$secret"
+}
 """
 
 
@@ -68,17 +98,20 @@ class LabelBasedContainerManager:
         }
 
     def build(self, tag="latest"):
-        """Build the container image from the embedded CONTAINERFILE."""
+        """Build the container image from the embedded CONTAINERFILE and PROFILE_SCRIPT."""
         full_image = f"{self.app_name}:{tag}"
         print(f"Building image: {full_image}")
 
         try:
-            image, build_logs = self.client.images.build(
-                fileobj=io.StringIO(CONTAINERFILE),
-                dockerfile="Containerfile",
-                tag=full_image,
-                labels=self.base_labels,
-            )
+            with tempfile.TemporaryDirectory() as context:
+                Path(context, "Containerfile").write_text(CONTAINERFILE)
+                Path(context, "daedalus.sh").write_text(PROFILE_SCRIPT)
+                image, build_logs = self.client.images.build(
+                    path=context,
+                    dockerfile="Containerfile",
+                    tag=full_image,
+                    labels=self.base_labels,
+                )
 
             for line in build_logs:
                 print_build_log(line)
@@ -168,7 +201,7 @@ class LabelBasedContainerManager:
         command += ["exec", "-it", "--workdir", pwd]
         if os.getenv("TERM"):
             command += ["--env", f"TERM={os.environ['TERM']}"]
-        command += [container.id, "/bin/sh", "-l"]
+        command += [container.id, "/bin/bash", "-l"]
 
         try:
             subprocess.run(command, check=False)
