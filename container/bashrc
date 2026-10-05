@@ -1,0 +1,10 @@
+# ~/.bashrc for the daedalus container
+
+# Start an ssh-agent, or reuse the one already running on the shared socket.
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-$HOME/.ssh}/agent.sock"
+ssh-add -l >/dev/null 2>&1
+if [ $? -eq 2 ]; then
+    mkdir -p -m 700 "$(dirname "$SSH_AUTH_SOCK")"
+    rm -f "$SSH_AUTH_SOCK"
+    eval "$(ssh-agent -s -a "$SSH_AUTH_SOCK")" >/dev/null
+fi
